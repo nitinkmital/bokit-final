@@ -82,6 +82,16 @@ var bot = controller.spawn({
     token: process.env.token
 }).startRTM();
 
+const mongodb = require('mongodb')
+const moment = require('moment')
+
+// DB URLs
+const devUrl = 'mongodb://mongodbtrigger:password@ds161580.mlab.com:61580/mongodbtrigger'
+const prodUrl = 'mongodb://localhost:27017/history'
+
+// ENV Vars
+const url = process.env.NODE_ENV === "production" ? prodUrl : devUrl
+
 controller.hears(['hello', 'hey'], 'direct_message', function (bot, message) {
 
     bot.api.reactions.add({
@@ -337,106 +347,148 @@ controller.hears(['who is using (.*)', 'what is the status of (.*)'], 'direct_me
     // creating complete machine name
     var completeoneboxname = machinelocation + '-' + newmachinetype + '-' + machinename;
     // bot.reply(message,completeoneboxname);
-    var range = XLSX.utils.decode_range(worksheet['!ref']);
-    var flag = 0; // get the range
-    for (var R = range.s.r; R <= range.e.r; ++R) {
-        for (var C = range.s.c; C <= range.e.c; ++C) {
-            /* find the cell object */
-            var cellref = XLSX.utils.encode_cell({
-                c: C,
-                r: R
-            }); // construct A1 reference for cell
-            if (!worksheet[cellref]) continue; // if cell doesn't exist, move on
-            var cell = worksheet[cellref];
 
-            /* if the cell is a text cell with the old string, change it */
+    const mongoClient = mongodb.MongoClient
 
-            if (cell.v === completeoneboxname) {
-                flag = 1;
-                var cellref2 = XLSX.utils.encode_cell({
-                    c: C + 1,
-                    r: R
-                }); // construct A1 reference for cell
-                if (!worksheet[cellref2]) continue; // if cell doesn't exist, move on
-                var cell2 = worksheet[cellref2];
-                if (cell2.v === 'NA') {
-                    bot.startConversation(message, function (err, convo) {
-                        if (!err) {
-                            convo.say('Great! this machine is not assigned to anyone till now');
-                            convo.say('Please provide your name so that this machine will be assigned to you');
-                            convo.ask('What should I call you?', function (response, convo) {
-                                convo.ask('You want me to assign ' + completeoneboxname + 'to ' + response.text + '`?', [{
-                                        pattern: 'yes',
-                                        callback: function (response, convo) {
-                                            // since no further messages are queued after this,
-                                            // the conversation will end naturasslly with status == 'completed'
-                                            convo.next();
-                                        }
-                                    },
-                                    {
-                                        pattern: 'no',
-                                        callback: function (response, convo) {
-                                            // stop the conversation. this will cause it to end with status == 'stopped'
-                                            convo.stop();
-                                        }
-                                    },
-                                    {
-                                        default: true,
-                                        callback: function (response, convo) {
-                                            convo.repeat();
-                                            convo.next();
-                                        }
-                                    }
-                                ]);
+    mongoClient.connect(url, async(err, db) => {
+        if (err) console.log(err)
+        db.listCollections().toArray(function (err, collections) {
+            const collection = collections.find(function (collection) {
+                completeoneboxname === collection
+            })
 
-                                convo.next();
-
-                            }, {
-                                'key': 'nickname'
-                            }); // store the results in a field called nickname
-
-                            convo.on('end', function (convo) {
-                                if (convo.status == 'completed') {
-                                    bot.reply(message, 'Done it');
-
-                                    controller.storage.users.get(message.user, function (err, user) {
-                                        if (!user) {
-                                            user = {
-                                                id: message.user,
-                                            };
-                                        }
-                                        user.name = convo.extractResponse('nickname');
-                                        controller.storage.users.save(user, function (err, id) {
-                                            cell2.v = user.name;
-                                            XLSX.writeFile(workbook, './excelConverter/obj.xlsx');
-                                            bot.reply(message, 'Got it. The machine' + completeoneboxname + ' is assigned to ' + user.name + ' from now onwards.');
-
-
-                                        });
-                                    });
-
-
-
-                                } else {
-                                    // this happens if the conversation ended prematurely for some reason
-                                    bot.reply(message, 'OK, nevermind!');
-                                }
-                            });
+            if (!collection) console.log() //TODO: Reply... No entry for this 1box name found...
+            else {
+                db.collection(collection).findOne(function (err, host) {
+                    if (host.login && host.logout) {
+                        if (moment(host.logout).isAfter(host.login)) {
+                            // TODO: no one is using vm... Last assigned to host.user
+                        } else if (!moment(host.logout).isAfter(host.login)) {
+                            // TODO: someone is using vm... Assigned to host.user
                         }
-                    });
-
-                } else {
-                    bot.reply(message, 'This one Box is assigned to the user :-  ' + cell2.v);
-
-                }
-
+                    } else {
+                        // Reply... login or logout script never ran on vm
+                    }
+                })
             }
+            // find name completeoneboxname === hostmae
+        })
 
+        if (!!host) {
+            console.log("Found entry for current host... Updating!")
+            host.user = user
+            host[taskType] = time
+            await hosts.save(host)
+        } else {
+            console.log("No entry for current host found... Creating!")
+            const query = {}
+            query["user"] = user
+            query[taskType] = time
+            await hosts.insert(query)
         }
-    }
-    if (flag === 0) {
-        bot.reply(message, 'There is no such virtual machine exist in my dossier please add it using my add machine functionality');
-    }
+        db.close()
+    })
+
+    // var range = XLSX.utils.decode_range(worksheet['!ref']);
+    // var flag = 0; // get the range
+    // for (var R = range.s.r; R <= range.e.r; ++R) {
+    //     for (var C = range.s.c; C <= range.e.c; ++C) {
+    //         /* find the cell object */
+    //         var cellref = XLSX.utils.encode_cell({
+    //             c: C,
+    //             r: R
+    //         }); // construct A1 reference for cell
+    //         if (!worksheet[cellref]) continue; // if cell doesn't exist, move on
+    //         var cell = worksheet[cellref];
+
+    //         /* if the cell is a text cell with the old string, change it */
+
+    //         if (cell.v === completeoneboxname) {
+    //             flag = 1;
+    //             var cellref2 = XLSX.utils.encode_cell({
+    //                 c: C + 1,
+    //                 r: R
+    //             }); // construct A1 reference for cell
+    //             if (!worksheet[cellref2]) continue; // if cell doesn't exist, move on
+    //             var cell2 = worksheet[cellref2];
+    //             if (cell2.v === 'NA') {
+    //                 bot.startConversation(message, function (err, convo) {
+    //                     if (!err) {
+    //                         convo.say('Great! this machine is not assigned to anyone till now');
+    //                         convo.say('Please provide your name so that this machine will be assigned to you');
+    //                         convo.ask('What should I call you?', function (response, convo) {
+    //                             convo.ask('You want me to assign ' + completeoneboxname + 'to ' + response.text + '`?', [{
+    //                                     pattern: 'yes',
+    //                                     callback: function (response, convo) {
+    //                                         // since no further messages are queued after this,
+    //                                         // the conversation will end naturasslly with status == 'completed'
+    //                                         convo.next();
+    //                                     }
+    //                                 },
+    //                                 {
+    //                                     pattern: 'no',
+    //                                     callback: function (response, convo) {
+    //                                         // stop the conversation. this will cause it to end with status == 'stopped'
+    //                                         convo.stop();
+    //                                     }
+    //                                 },
+    //                                 {
+    //                                     default: true,
+    //                                     callback: function (response, convo) {
+    //                                         convo.repeat();
+    //                                         convo.next();
+    //                                     }
+    //                                 }
+    //                             ]);
+
+    //                             convo.next();
+
+    //                         }, {
+    //                             'key': 'nickname'
+    //                         }); // store the results in a field called nickname
+
+    //                         convo.on('end', function (convo) {
+    //                             if (convo.status == 'completed') {
+    //                                 bot.reply(message, 'Done it');
+
+    //                                 controller.storage.users.get(message.user, function (err, user) {
+    //                                     if (!user) {
+    //                                         user = {
+    //                                             id: message.user,
+    //                                         };
+    //                                     }
+    //                                     user.name = convo.extractResponse('nickname');
+    //                                     controller.storage.users.save(user, function (err, id) {
+    //                                         cell2.v = user.name;
+    //                                         XLSX.writeFile(workbook, './excelConverter/obj.xlsx');
+    //                                         bot.reply(message, 'Got it. The machine' + completeoneboxname + ' is assigned to ' + user.name + ' from now onwards.');
+
+
+    //                                     });
+    //                                 });
+
+
+
+    //                             } else {
+    //                                 // this happens if the conversation ended prematurely for some reason
+    //                                 bot.reply(message, 'OK, nevermind!');
+    //                             }
+    //                         });
+    //                     }
+    //                 });
+
+    //             } else {
+    //                 bot.reply(message, 'This one Box is assigned to the user :-  ' + cell2.v);
+
+    //             }
+
+    //         }
+
+    //     }
+    // }
+    // if (flag === 0) {
+    //     bot.reply(message, 'There is no such virtual machine exist in my dossier please add it using my add machine functionality');
+    // }
 });
 controller.hears(['add new machine (.*)', 'add a new machine (.*)'], 'direct_message,direct_mention', function (bot, message) {
     var completemachinenameinput = message.match[1];
