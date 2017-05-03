@@ -18,6 +18,8 @@
     "jfs": "^0.2.6",
     "localtunnel": "^1.8.1",
     "md5": "^2.1.0",
+    "moment": "^2.18.1",
+    "mongodb": "^2.2.26",
     "mustache": "^2.2.1",
     "promise": "^7.1.1",
     "randomstring": "^1.1.5",
